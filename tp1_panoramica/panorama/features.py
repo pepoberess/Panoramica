@@ -124,13 +124,7 @@ def match_with_lowe_ratio(
     if len(query_descriptors) == 0 or len(train_descriptors) < 2:
         return []
 
-    normalized_name = detector_name.lower()
-    if normalized_name == "sift":
-        norm_type = cv2.NORM_L2
-    elif normalized_name == "orb":
-        norm_type = cv2.NORM_HAMMING
-    else:
-        raise ValueError("Detector no soportado. Usar 'sift' u 'orb'.")
+    norm_type = _norm_type_for_detector(detector_name)
 
     matcher = cv2.BFMatcher(normType=norm_type, crossCheck=False)
     nearest_neighbors = matcher.knnMatch(query_descriptors, train_descriptors, k=2)
@@ -143,19 +137,98 @@ def match_with_lowe_ratio(
     ]
 
 
+def match_with_cross_check(
+    query_descriptors: np.ndarray | None,
+    train_descriptors: np.ndarray | None,
+    detector_name: str = "sift",
+) -> list[cv2.DMatch]:
+    """Conserva matches mutuos: A elige a B y B también elige a A."""
+    if query_descriptors is None or train_descriptors is None:
+        return []
+    if len(query_descriptors) == 0 or len(train_descriptors) == 0:
+        return []
+
+    matcher = cv2.BFMatcher(
+        normType=_norm_type_for_detector(detector_name), crossCheck=True
+    )
+    return sorted(matcher.match(query_descriptors, train_descriptors), key=lambda match: match.distance)
+
+
+def match_with_lowe_and_cross_check(
+    query_descriptors: np.ndarray | None,
+    train_descriptors: np.ndarray | None,
+    detector_name: str = "sift",
+    ratio: float = 0.75,
+) -> list[cv2.DMatch]:
+    """Conserva únicamente los matches que satisfacen Lowe ratio y cross-check."""
+    lowe_matches = match_with_lowe_ratio(
+        query_descriptors, train_descriptors, detector_name, ratio
+    )
+    cross_check_pairs = {
+        (match.queryIdx, match.trainIdx)
+        for match in match_with_cross_check(
+            query_descriptors, train_descriptors, detector_name
+        )
+    }
+    return [
+        match
+        for match in lowe_matches
+        if (match.queryIdx, match.trainIdx) in cross_check_pairs
+    ]
+
+
+def _norm_type_for_detector(detector_name: str) -> int:
+    """Devuelve la distancia compatible con los descriptores del detector."""
+    normalized_name = detector_name.lower()
+    if normalized_name == "sift":
+        return cv2.NORM_L2
+    if normalized_name == "orb":
+        return cv2.NORM_HAMMING
+    raise ValueError("Detector no soportado. Usar 'sift' u 'orb'.")
+
+
+def match_descriptors(
+    query_descriptors: np.ndarray | None,
+    train_descriptors: np.ndarray | None,
+    detector_name: str = "sift",
+    ratio: float = 0.75,
+    method: str = "lowe",
+) -> list[cv2.DMatch]:
+    """Asocia descriptores según ``lowe``, ``cross_check`` o ambos filtros."""
+    normalized_method = method.lower()
+    if normalized_method == "lowe":
+        return match_with_lowe_ratio(
+            query_descriptors, train_descriptors, detector_name, ratio
+        )
+    if normalized_method == "cross_check":
+        return match_with_cross_check(query_descriptors, train_descriptors, detector_name)
+    if normalized_method == "lowe_cross_check":
+        return match_with_lowe_and_cross_check(
+            query_descriptors, train_descriptors, detector_name, ratio
+        )
+    raise ValueError(
+        "Método no soportado. Usar 'lowe', 'cross_check' o 'lowe_cross_check'."
+    )
+
+
 def match_triplet_to_anchor(
     descriptors: dict[int, np.ndarray | None],
     anchor_index: int = 1,
     detector_name: str = "sift",
     ratio: float = 0.75,
+    method: str = "lowe",
 ) -> dict[int, list[cv2.DMatch]]:
-    """Obtiene los matches de cada imagen lateral hacia la imagen ancla."""
+    """Obtiene matches de cada imagen lateral hacia la ancla con el método elegido."""
     if anchor_index not in descriptors:
         raise KeyError(f"No hay descriptores para la imagen ancla {anchor_index}.")
 
     return {
-        index: match_with_lowe_ratio(
-            descriptors[index], descriptors[anchor_index], detector_name, ratio
+        index: match_descriptors(
+            descriptors[index],
+            descriptors[anchor_index],
+            detector_name,
+            ratio,
+            method,
         )
         for index in descriptors
         if index != anchor_index
