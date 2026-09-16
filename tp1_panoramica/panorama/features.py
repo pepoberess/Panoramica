@@ -7,8 +7,14 @@ import numpy as np
 
 
 def load_image(image_path: Path) -> np.ndarray:
-    """Carga una imagen BGR y falla con un mensaje claro si no es legible."""
-    image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+    """Carga una imagen BGR y falla con un mensaje claro si no es legible.
+
+    Se usa ``np.fromfile`` + ``cv2.imdecode`` en lugar de ``cv2.imread``
+    porque este último no soporta rutas con caracteres no-ASCII en Windows
+    (por ejemplo, una carpeta del proyecto llamada "Visión Artificial").
+    """
+    raw_bytes = np.fromfile(str(image_path), dtype=np.uint8)
+    image = cv2.imdecode(raw_bytes, cv2.IMREAD_COLOR)
     if image is None:
         raise FileNotFoundError(f"No se pudo cargar la imagen: {image_path}")
     return image

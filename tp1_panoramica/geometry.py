@@ -64,6 +64,11 @@ def dlt(spts, dpts, normalize=False):
     h = Vt[-1]
 
     H = h.reshape(3, 3)
+
+    if normalize:
+        # Undo the Hartley normalization: H_pixels = T_dst^-1 @ H_norm @ T_src
+        H = np.linalg.inv(T_dst) @ H @ T_src
+
     H = H / H[2, 2]
 
     return H
@@ -103,8 +108,8 @@ def ransac(spts, dpts, num_iterations=2000, threshold=5.0, seed=None):
         seed: optional random seed for reproducibility.
 
     Returns:
-        best_H: (3, 3) homography from the winning sample (4 points only,
-            not yet refit on inliers).
+        best_H: (3, 3) homography refit by least squares (DLT) over every
+            inlier correspondence of the winning sample.
         best_inlier_mask: (N,) boolean array marking inlier correspondences.
     """
     rng = np.random.default_rng(seed)
@@ -126,5 +131,11 @@ def ransac(spts, dpts, num_iterations=2000, threshold=5.0, seed=None):
             best_inlier_count = inlier_count
             best_H = H_candidate
             best_inlier_mask = inlier_mask
+
+    if best_H is None:
+        raise RuntimeError("RANSAC no encontró ningún modelo válido.")
+    
+    # Refit the homography using all inlier correspondences.
+    best_H = dlt(spts[best_inlier_mask], dpts[best_inlier_mask], normalize=True)
 
     return best_H, best_inlier_mask
