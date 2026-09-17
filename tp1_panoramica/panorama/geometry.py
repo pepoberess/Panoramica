@@ -33,31 +33,6 @@ def dlt(spts, dpts):
 
     return H
 
-def pick_correspondences(img_source, img_anchor, num_points=4):
-    """Permite clickear a mano `num_points` correspondencias entre dos imagenes.
-
-    Requiere un backend interactivo (ej. `%matplotlib widget` o `%matplotlib qt`).
-    Primero se clickean los puntos sobre la imagen lateral y luego los mismos
-    puntos, en el mismo orden, sobre la imagen ancla.
-    """
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
-    axes[0].imshow(cv2.cvtColor(img_source, cv2.COLOR_BGR2RGB))
-    axes[0].set_title(f"Click {num_points} puntos (imagen lateral)")
-    axes[0].axis("off")
-    axes[1].imshow(cv2.cvtColor(img_anchor, cv2.COLOR_BGR2RGB))
-    axes[1].set_title("Ancla (esperando)")
-    axes[1].axis("off")
-    plt.tight_layout()
-
-    source_points = plt.ginput(num_points, timeout=0)
-
-    axes[1].set_title(f"Click los mismos {num_points} puntos, en el mismo orden")
-    fig.canvas.draw()
-    anchor_points = plt.ginput(num_points, timeout=0)
-
-    plt.close(fig)
-    return np.float32(source_points), np.float32(anchor_points)
-
 def compute_reprojection_error(H, spts, dpts):
     """
     Compute the per-point Euclidean reprojection error when mapping
