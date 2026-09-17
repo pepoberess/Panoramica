@@ -1,36 +1,8 @@
 import numpy as np
+import matplotlib.pyplot as plt
+import cv2
 
-def normalize_points(pts):
-    """
-    Normalize 2D points so their centroid is at the origin and their
-    average distance to the origin is sqrt(2), per Hartley's method.
-
-    Args:
-        pts: (N, 2) array of points.
-
-    Returns:
-        pts_norm: (N, 2) array of normalized points.
-        T: (3, 3) similarity transform such that pts_norm_hom = T @ pts_hom.
-    """
-    centroid = pts.mean(axis=0)
-    shifted = pts - centroid
-
-    mean_dist = np.mean(np.linalg.norm(shifted, axis=1))
-    scale = np.sqrt(2) / mean_dist
-
-    T = np.array([
-        [scale,     0, -scale * centroid[0]],
-        [    0, scale, -scale * centroid[1]],
-        [    0,     0,                    1]
-    ])
-
-    pts_hom = np.hstack([pts, np.ones((pts.shape[0], 1))])
-    pts_norm_hom = (T @ pts_hom.T).T
-    pts_norm = pts_norm_hom[:, :2]
-
-    return pts_norm, T
-
-def dlt(spts, dpts, normalize=False):
+def dlt(spts, dpts):
     """
     Estimate a homography matrix H such that dst ~ H @ src, using the
     Direct Linear Transformation (DLT) algorithm.
@@ -38,17 +10,10 @@ def dlt(spts, dpts, normalize=False):
     Args:
         spts: (N, 2) array of points in the source image, N >= 4.
         dpts: (N, 2) array of corresponding points in the destination image.
-        normalize: if True, apply Hartley normalization before solving DLT
-            and denormalize the resulting H (improves numerical stability).
 
     Returns:
         H: (3, 3) homography matrix, normalized so H[2, 2] == 1.
     """
-    if normalize:
-        snorm, T_src = normalize_points(spts)
-        dnorm, T_dst = normalize_points(dpts)
-        spts, dpts = snorm, dnorm
-
     n = spts.shape[0]
     A = np.zeros((2 * n, 9))
 
@@ -64,15 +29,34 @@ def dlt(spts, dpts, normalize=False):
     h = Vt[-1]
 
     H = h.reshape(3, 3)
-
-    if normalize:
-        # Undo the Hartley normalization: H_pixels = T_dst^-1 @ H_norm @ T_src
-        H = np.linalg.inv(T_dst) @ H @ T_src
-
     H = H / H[2, 2]
 
     return H
 
+def pick_correspondences(img_source, img_anchor, num_points=4):
+    """Permite clickear a mano `num_points` correspondencias entre dos imagenes.
+
+    Requiere un backend interactivo (ej. `%matplotlib widget` o `%matplotlib qt`).
+    Primero se clickean los puntos sobre la imagen lateral y luego los mismos
+    puntos, en el mismo orden, sobre la imagen ancla.
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    axes[0].imshow(cv2.cvtColor(img_source, cv2.COLOR_BGR2RGB))
+    axes[0].set_title(f"Click {num_points} puntos (imagen lateral)")
+    axes[0].axis("off")
+    axes[1].imshow(cv2.cvtColor(img_anchor, cv2.COLOR_BGR2RGB))
+    axes[1].set_title("Ancla (esperando)")
+    axes[1].axis("off")
+    plt.tight_layout()
+
+    source_points = plt.ginput(num_points, timeout=0)
+
+    axes[1].set_title(f"Click los mismos {num_points} puntos, en el mismo orden")
+    fig.canvas.draw()
+    anchor_points = plt.ginput(num_points, timeout=0)
+
+    plt.close(fig)
+    return np.float32(source_points), np.float32(anchor_points)
 
 def compute_reprojection_error(H, spts, dpts):
     """
@@ -134,8 +118,14 @@ def ransac(spts, dpts, num_iterations=2000, threshold=5.0, seed=None):
 
     if best_H is None:
         raise RuntimeError("RANSAC no encontró ningún modelo válido.")
-    
-    # Refit the homography using all inlier correspondences.
-    best_H = dlt(spts[best_inlier_mask], dpts[best_inlier_mask], normalize=True)
+
+    # Refit la homografia con todos los inliers de la mejor muestra.
+    best_H = dlt(spts[best_inlier_mask], dpts[best_inlier_mask])
+
+    # La mascara de inliers usada para el refit corresponde a la H de la
+    # muestra de 4 puntos, no a la H final. Se recalculan errores e inliers
+    # con la H final para que ambos sean consistentes entre si.
+    errors = compute_reprojection_error(best_H, spts, dpts)
+    best_inlier_mask = errors < threshold
 
     return best_H, best_inlier_mask
