@@ -5,11 +5,23 @@ import numpy as np
 
 
 def warp_image_to_canvas(image, H, size, interpolation):
-    """Aplica H final a una imagen; size usa el orden (ancho, alto).
+    """Aplica una homografía final sobre el canvas común.
 
-    H debe incluir la traslación calculada en 3.6. La interpolación se recibe
-    explícitamente para poder comparar métodos. Fuera de la imagen se usa 0.
-    Acepta imágenes de color o máscaras 2D; no combina imágenes.
+    Parámetros
+    ----------
+    image : np.ndarray
+        Imagen de color o máscara bidimensional.
+    H : np.ndarray
+        Homografía que ya incluye la traslación del canvas.
+    size : tuple[int, int]
+        Tamaño en orden ``(ancho, alto)``.
+    interpolation : int
+        Método de interpolación de OpenCV.
+
+    Retorna
+    -------
+    np.ndarray
+        Imagen deformada sobre el canvas.
     """
     if not isinstance(image, np.ndarray) or image.ndim not in (2, 3) or image.size == 0:
         raise ValueError("La imagen debe ser un array 2D o 3D no vacío.")
@@ -28,10 +40,21 @@ def warp_image_to_canvas(image, H, size, interpolation):
 
 
 def warp_valid_mask(image, H, size):
-    """Transforma una máscara de validez: 255 dentro de la imagen, 0 fuera.
+    """Transforma la máscara de validez de una imagen.
 
-    Se usa NEAREST para conservar valores binarios. La validez depende del
-    soporte de la imagen original, no de si sus píxeles son negros.
+    Parámetros
+    ----------
+    image : np.ndarray
+        Imagen original cuya región completa se considera válida.
+    H : np.ndarray
+        Homografía final hacia el canvas.
+    size : tuple[int, int]
+        Tamaño del canvas en orden ``(ancho, alto)``.
+
+    Retorna
+    -------
+    np.ndarray
+        Máscara binaria con 255 dentro y 0 fuera.
     """
     if not isinstance(image, np.ndarray) or image.ndim not in (2, 3) or image.size == 0:
         raise ValueError("La imagen debe ser un array 2D o 3D no vacío.")

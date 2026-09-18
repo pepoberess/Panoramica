@@ -1,4 +1,4 @@
-"""Carga de imágenes y extracción inicial de features para el TP1."""
+"""Carga, detección, descripción y asociación de características."""
 
 from pathlib import Path
 
@@ -9,9 +9,15 @@ import numpy as np
 def load_image(image_path: Path) -> np.ndarray:
     """Carga una imagen BGR y falla con un mensaje claro si no es legible.
 
-    Se usa ``np.fromfile`` + ``cv2.imdecode`` en lugar de ``cv2.imread``
-    porque este último no soporta rutas con caracteres no-ASCII en Windows
-    (por ejemplo, una carpeta del proyecto llamada "Visión Artificial").
+    Parámetros
+    ----------
+    image_path : Path
+        Ruta de la imagen.
+
+    Retorna
+    -------
+    np.ndarray
+        Imagen en el orden de canales BGR.
     """
     raw_bytes = np.fromfile(str(image_path), dtype=np.uint8)
     image = cv2.imdecode(raw_bytes, cv2.IMREAD_COLOR)
@@ -20,39 +26,83 @@ def load_image(image_path: Path) -> np.ndarray:
     return image
 
 
-def load_triplet(input_dir: Path, dataset: str) -> dict[int, np.ndarray]:
-    """Carga las tres imágenes ``<dataset>_0.jpg`` a ``<dataset>_2.jpg``.
+def load_images(image_paths: dict[int, Path]) -> dict[int, np.ndarray]:
+    """Carga un conjunto de imágenes indexado y conserva sus claves.
 
-    La imagen 1 se utilizará como ancla en las etapas posteriores.
+    Parámetros
+    ----------
+    image_paths : dict[int, Path]
+        Rutas asociadas a los índices de las imágenes.
+
+    Retorna
+    -------
+    dict[int, np.ndarray]
+        Imágenes BGR cargadas.
     """
-    image_paths = {
-        index: input_dir / f"{dataset}_{index}.jpg" for index in range(3)
-    }
     missing = [path for path in image_paths.values() if not path.is_file()]
     if missing:
         missing_names = ", ".join(str(path) for path in missing)
         raise FileNotFoundError(f"Faltan imágenes del dataset: {missing_names}")
-
     return {index: load_image(path) for index, path in image_paths.items()}
 
 
+def load_triplet(input_dir: Path, dataset: str) -> dict[int, np.ndarray]:
+    """Carga las imágenes ``<dataset>_0.jpg`` a ``<dataset>_2.jpg``.
+
+    Parámetros
+    ----------
+    input_dir : Path
+        Directorio que contiene las imágenes.
+    dataset : str
+        Prefijo común de los tres archivos.
+
+    Retorna
+    -------
+    dict[int, np.ndarray]
+        Tripleta BGR indexada de 0 a 2.
+    """
+    image_paths = {
+        index: input_dir / f"{dataset}_{index}.jpg" for index in range(3)
+    }
+    return load_images(image_paths)
+
+
 def to_grayscale(image: np.ndarray) -> np.ndarray:
-    """Convierte una imagen BGR de OpenCV a escala de grises."""
+    """Convierte una imagen BGR a escala de grises.
+
+    Parámetros
+    ----------
+    image : np.ndarray
+        Imagen BGR o ya monocromática.
+
+    Retorna
+    -------
+    np.ndarray
+        Imagen de un canal.
+    """
     if image.ndim == 2:
         return image
     return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
 
 def create_detector(name: str = "sift", nfeatures: int = 1500):
-    """Crea el detector y descriptor elegido para las primeras pruebas.
+    """Crea un detector y descriptor SIFT u ORB.
 
-    SIFT es la opción por defecto porque suele ser robusta para este dataset y
-    genera descriptores flotantes comparables con distancia L2.
+    Parámetros
+    ----------
+    name : str
+        Nombre del método.
+    nfeatures : int
+        Cantidad máxima de características solicitadas.
+
+    Retorna
+    -------
+    cv2.Feature2D
+        Detector configurado.
     """
-    # 
     normalized_name = name.lower()
     if normalized_name == "sift":
-        if not hasattr(cv2, "SIFT_create"): # SIFT: histogramas de gradientes
+        if not hasattr(cv2, "SIFT_create"):
             raise RuntimeError("Esta instalación de OpenCV no incluye SIFT.")
         return cv2.SIFT_create(nfeatures=nfeatures)
     if normalized_name == "orb":
@@ -63,7 +113,22 @@ def create_detector(name: str = "sift", nfeatures: int = 1500):
 def detect_and_describe(
     gray_image: np.ndarray, detector_name: str = "sift", nfeatures: int = 1500
 ) -> tuple[list[cv2.KeyPoint], np.ndarray | None]:
-    """Detecta keypoints y calcula sus descriptores en una imagen en gris."""
+    """Detecta puntos de interés y calcula sus descriptores.
+
+    Parámetros
+    ----------
+    gray_image : np.ndarray
+        Imagen en escala de grises.
+    detector_name : str
+        Nombre del detector y descriptor.
+    nfeatures : int
+        Cantidad máxima de puntos solicitados.
+
+    Retorna
+    -------
+    tuple[list[cv2.KeyPoint], np.ndarray | None]
+        Puntos detectados y descriptores asociados.
+    """
     detector = create_detector(detector_name, nfeatures)
     keypoints, descriptors = detector.detectAndCompute(gray_image, None)
     return keypoints, descriptors
@@ -75,12 +140,27 @@ def adaptive_non_maximal_suppression(
     num_features: int = 500,
     robustness: float = 0.9,
 ) -> tuple[list[cv2.KeyPoint], np.ndarray | None]:
-    """Selecciona keypoints fuertes y espacialmente distribuidos mediante A-NMS.
+    """Selecciona puntos fuertes y distribuidos mediante A-NMS.
 
-    Para cada punto se calcula el radio hasta el keypoint más cercano cuya
-    respuesta sea suficientemente mayor (``response_j > robustness * response_i``).
-    Se conservan los ``num_features`` puntos con mayor radio adaptativo. Los
-    descriptores devueltos mantienen el mismo orden que los keypoints elegidos.
+    Para cada punto se obtiene la distancia al punto más cercano que cumple
+    ``respuesta_i < robustness * respuesta_j``. Luego se conservan los radios
+    mayores y los descriptores se reordenan con los mismos índices.
+
+    Parámetros
+    ----------
+    keypoints : list[cv2.KeyPoint]
+        Puntos detectados.
+    descriptors : np.ndarray | None
+        Descriptores en el mismo orden.
+    num_features : int
+        Cantidad máxima de puntos a conservar.
+    robustness : float
+        Factor de robustez entre cero y uno.
+
+    Retorna
+    -------
+    tuple[list[cv2.KeyPoint], np.ndarray | None]
+        Puntos y descriptores seleccionados.
     """
     if not 0 < robustness <= 1:
         raise ValueError("robustness debe estar entre 0 (exclusivo) y 1.")
@@ -92,12 +172,14 @@ def adaptive_non_maximal_suppression(
         return [], None if descriptors is None else descriptors[:0]
 
     points = np.array([keypoint.pt for keypoint in keypoints], dtype=np.float32)
-    responses = np.array([keypoint.response for keypoint in keypoints], dtype=np.float32)
+    responses = np.array(
+        [keypoint.response for keypoint in keypoints], dtype=np.float32
+    )
     radii = np.full(len(keypoints), np.inf, dtype=np.float32)
 
     for index, (point, response) in enumerate(zip(points, responses)):
-        stronger = responses > robustness * response
-        stronger[index] = False  # Un keypoint no puede suprimir a sí mismo.
+        stronger = robustness * responses > response
+        stronger[index] = False
         if np.any(stronger):
             distances = np.linalg.norm(points[stronger] - point, axis=1)
             radii[index] = distances.min()
@@ -111,17 +193,39 @@ def adaptive_non_maximal_suppression(
     return selected_keypoints, selected_descriptors
 
 
+def _norm_type_for_detector(detector_name: str) -> int:
+    """Devuelve la distancia compatible con los descriptores elegidos."""
+    normalized_name = detector_name.lower()
+    if normalized_name == "sift":
+        return cv2.NORM_L2
+    if normalized_name == "orb":
+        return cv2.NORM_HAMMING
+    raise ValueError("Detector no soportado. Usar 'sift' u 'orb'.")
+
+
 def match_with_lowe_ratio(
     query_descriptors: np.ndarray | None,
     train_descriptors: np.ndarray | None,
     detector_name: str = "sift",
     ratio: float = 0.75,
 ) -> list[cv2.DMatch]:
-    """Asocia descriptores y conserva los matches que pasan Lowe ratio.
+    """Asocia descriptores y conserva los que pasan Lowe ratio.
 
-    Los índices ``queryIdx`` de cada match pertenecen a la imagen lateral y
-    ``trainIdx`` a la imagen ancla. Esto permite recuperar luego las coordenadas
-    para DLT y RANSAC.
+    Parámetros
+    ----------
+    query_descriptors : np.ndarray | None
+        Descriptores de la imagen lateral.
+    train_descriptors : np.ndarray | None
+        Descriptores de la imagen ancla.
+    detector_name : str
+        Nombre del descriptor utilizado.
+    ratio : float
+        Umbral de Lowe entre cero y uno.
+
+    Retorna
+    -------
+    list[cv2.DMatch]
+        Correspondencias lateral hacia ancla.
     """
     if not 0 < ratio < 1:
         raise ValueError("ratio debe estar entre 0 y 1.")
@@ -130,10 +234,12 @@ def match_with_lowe_ratio(
     if len(query_descriptors) == 0 or len(train_descriptors) < 2:
         return []
 
-    norm_type = _norm_type_for_detector(detector_name)
-
-    matcher = cv2.BFMatcher(normType=norm_type, crossCheck=False)
-    nearest_neighbors = matcher.knnMatch(query_descriptors, train_descriptors, k=2)
+    matcher = cv2.BFMatcher(
+        normType=_norm_type_for_detector(detector_name), crossCheck=False
+    )
+    nearest_neighbors = matcher.knnMatch(
+        query_descriptors, train_descriptors, k=2
+    )
     return [
         best_match
         for candidates in nearest_neighbors
@@ -148,7 +254,22 @@ def match_with_cross_check(
     train_descriptors: np.ndarray | None,
     detector_name: str = "sift",
 ) -> list[cv2.DMatch]:
-    """Conserva matches mutuos: A elige a B y B también elige a A."""
+    """Conserva asociaciones mutuas entre la imagen lateral y el ancla.
+
+    Parámetros
+    ----------
+    query_descriptors : np.ndarray | None
+        Descriptores de la imagen lateral.
+    train_descriptors : np.ndarray | None
+        Descriptores de la imagen ancla.
+    detector_name : str
+        Nombre del descriptor utilizado.
+
+    Retorna
+    -------
+    list[cv2.DMatch]
+        Correspondencias ordenadas por distancia.
+    """
     if query_descriptors is None or train_descriptors is None:
         return []
     if len(query_descriptors) == 0 or len(train_descriptors) == 0:
@@ -157,7 +278,8 @@ def match_with_cross_check(
     matcher = cv2.BFMatcher(
         normType=_norm_type_for_detector(detector_name), crossCheck=True
     )
-    return sorted(matcher.match(query_descriptors, train_descriptors), key=lambda match: match.distance)
+    matches = matcher.match(query_descriptors, train_descriptors)
+    return sorted(matches, key=lambda match: match.distance)
 
 
 def match_with_lowe_and_cross_check(
@@ -166,7 +288,24 @@ def match_with_lowe_and_cross_check(
     detector_name: str = "sift",
     ratio: float = 0.75,
 ) -> list[cv2.DMatch]:
-    """Conserva únicamente los matches que satisfacen Lowe ratio y cross-check."""
+    """Combina Lowe ratio con verificación cruzada.
+
+    Parámetros
+    ----------
+    query_descriptors : np.ndarray | None
+        Descriptores de la imagen lateral.
+    train_descriptors : np.ndarray | None
+        Descriptores de la imagen ancla.
+    detector_name : str
+        Nombre del descriptor utilizado.
+    ratio : float
+        Umbral de Lowe.
+
+    Retorna
+    -------
+    list[cv2.DMatch]
+        Intersección de ambas políticas.
+    """
     lowe_matches = match_with_lowe_ratio(
         query_descriptors, train_descriptors, detector_name, ratio
     )
@@ -183,16 +322,6 @@ def match_with_lowe_and_cross_check(
     ]
 
 
-def _norm_type_for_detector(detector_name: str) -> int:
-    """Devuelve la distancia compatible con los descriptores del detector."""
-    normalized_name = detector_name.lower()
-    if normalized_name == "sift":
-        return cv2.NORM_L2
-    if normalized_name == "orb":
-        return cv2.NORM_HAMMING
-    raise ValueError("Detector no soportado. Usar 'sift' u 'orb'.")
-
-
 def match_descriptors(
     query_descriptors: np.ndarray | None,
     train_descriptors: np.ndarray | None,
@@ -200,14 +329,35 @@ def match_descriptors(
     ratio: float = 0.75,
     method: str = "lowe",
 ) -> list[cv2.DMatch]:
-    """Asocia descriptores según ``lowe``, ``cross_check`` o ambos filtros."""
+    """Asocia descriptores con Lowe, cross-check o ambos filtros.
+
+    Parámetros
+    ----------
+    query_descriptors : np.ndarray | None
+        Descriptores de la imagen lateral.
+    train_descriptors : np.ndarray | None
+        Descriptores de la imagen ancla.
+    detector_name : str
+        Nombre del descriptor utilizado.
+    ratio : float
+        Umbral de Lowe.
+    method : str
+        Política de filtrado.
+
+    Retorna
+    -------
+    list[cv2.DMatch]
+        Correspondencias filtradas.
+    """
     normalized_method = method.lower()
     if normalized_method == "lowe":
         return match_with_lowe_ratio(
             query_descriptors, train_descriptors, detector_name, ratio
         )
     if normalized_method == "cross_check":
-        return match_with_cross_check(query_descriptors, train_descriptors, detector_name)
+        return match_with_cross_check(
+            query_descriptors, train_descriptors, detector_name
+        )
     if normalized_method == "lowe_cross_check":
         return match_with_lowe_and_cross_check(
             query_descriptors, train_descriptors, detector_name, ratio
@@ -224,10 +374,28 @@ def match_triplet_to_anchor(
     ratio: float = 0.75,
     method: str = "lowe",
 ) -> dict[int, list[cv2.DMatch]]:
-    """Obtiene matches de cada imagen lateral hacia la ancla con el método elegido."""
+    """Asocia cada imagen lateral con la imagen ancla.
+
+    Parámetros
+    ----------
+    descriptors : dict[int, np.ndarray | None]
+        Descriptores de todas las imágenes.
+    anchor_index : int
+        Índice de la imagen ancla.
+    detector_name : str
+        Nombre del descriptor utilizado.
+    ratio : float
+        Umbral de Lowe.
+    method : str
+        Política de filtrado.
+
+    Retorna
+    -------
+    dict[int, list[cv2.DMatch]]
+        Matches de cada lateral hacia el ancla.
+    """
     if anchor_index not in descriptors:
         raise KeyError(f"No hay descriptores para la imagen ancla {anchor_index}.")
-
     return {
         index: match_descriptors(
             descriptors[index],
@@ -246,23 +414,61 @@ def matched_point_coordinates(
     train_keypoints: list[cv2.KeyPoint],
     matches: list[cv2.DMatch],
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Devuelve coordenadas correspondientes ``(origen, ancla)`` para geometría."""
-    query_points = np.float32([query_keypoints[match.queryIdx].pt for match in matches])
-    train_points = np.float32([train_keypoints[match.trainIdx].pt for match in matches])
+    """Convierte matches en pares de coordenadas origen y ancla.
+
+    Parámetros
+    ----------
+    query_keypoints : list[cv2.KeyPoint]
+        Puntos de la imagen lateral.
+    train_keypoints : list[cv2.KeyPoint]
+        Puntos de la imagen ancla.
+    matches : list[cv2.DMatch]
+        Correspondencias entre ambas listas.
+
+    Retorna
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Coordenadas de origen y destino con forma ``(N, 2)``.
+    """
+    query_points = np.float32(
+        [query_keypoints[match.queryIdx].pt for match in matches]
+    ).reshape(-1, 2)
+    train_points = np.float32(
+        [train_keypoints[match.trainIdx].pt for match in matches]
+    ).reshape(-1, 2)
     return query_points, train_points
 
 
 def extract_triplet_features(
-    images: dict[int, np.ndarray], detector_name: str = "sift", nfeatures: int = 1500
-) -> tuple[dict[int, np.ndarray], dict[int, list[cv2.KeyPoint]], dict[int, np.ndarray | None]]:
-    """Convierte las tres imágenes a gris y extrae features de cada una."""
+    images: dict[int, np.ndarray],
+    detector_name: str = "sift",
+    nfeatures: int = 1500,
+) -> tuple[
+    dict[int, np.ndarray],
+    dict[int, list[cv2.KeyPoint]],
+    dict[int, np.ndarray | None],
+]:
+    """Convierte imágenes a gris y extrae sus características.
+
+    Parámetros
+    ----------
+    images : dict[int, np.ndarray]
+        Imágenes BGR indexadas.
+    detector_name : str
+        Nombre del detector y descriptor.
+    nfeatures : int
+        Cantidad máxima de puntos solicitados.
+
+    Retorna
+    -------
+    tuple[dict, dict, dict]
+        Imágenes grises, keypoints y descriptores.
+    """
     grays = {index: to_grayscale(image) for index, image in images.items()}
     keypoints: dict[int, list[cv2.KeyPoint]] = {}
     descriptors: dict[int, np.ndarray | None] = {}
-
     for index, gray_image in grays.items():
         keypoints[index], descriptors[index] = detect_and_describe(
             gray_image, detector_name, nfeatures
         )
-
     return grays, keypoints, descriptors

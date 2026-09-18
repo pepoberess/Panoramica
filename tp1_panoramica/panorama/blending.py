@@ -5,11 +5,19 @@ import numpy as np
 
 
 def stitch_overwrite(images, masks):
-    """Copia en el orden recibido; la última imagen válida tiene prioridad.
+    """Copia imágenes en orden y da prioridad a la última válida.
 
-    images: imágenes uint8 de igual shape (alto, ancho, 3).
-    masks: máscaras del mismo canvas, 0 fuera y 255 dentro de cada imagen.
-    Los píxeles negros también se copian si su máscara es válida.
+    Parámetros
+    ----------
+    images : list[np.ndarray]
+        Imágenes del mismo canvas.
+    masks : list[np.ndarray]
+        Máscaras binarias asociadas.
+
+    Retorna
+    -------
+    np.ndarray
+        Panorama con pegado directo.
     """
     panorama = np.zeros_like(images[0])
     for image, mask in zip(images, masks):
@@ -19,12 +27,24 @@ def stitch_overwrite(images, masks):
 
 
 def simple_average_blend(images, masks):
-    """Promedia sólo las imágenes válidas en cada píxel; exterior negro."""
+    """Promedia las imágenes válidas y deja negro el exterior.
+
+    Parámetros
+    ----------
+    images : list[np.ndarray]
+        Imágenes del mismo canvas.
+    masks : list[np.ndarray]
+        Máscaras binarias asociadas.
+
+    Retorna
+    -------
+    np.ndarray
+        Panorama promediado en tipo ``uint8``.
+    """
     accumulator = np.zeros(images[0].shape, dtype=np.float32)
     count = np.zeros(images[0].shape[:2], dtype=np.float32)
     for image, mask in zip(images, masks):
         valid = mask > 0
-        # El destino float32 evita sumar intensidades en uint8.
         np.add(accumulator, image, out=accumulator, where=valid[..., None])
         count += valid
     assert np.isfinite(accumulator).all() and np.isfinite(count).all()
@@ -37,11 +57,17 @@ def simple_average_blend(images, masks):
 
 
 def distance_weight(mask):
-    """Peso float32 = distancia al exterior de una máscara, cero fuera.
+    """Calcula el peso según la distancia al exterior de una máscara.
 
-    Un borde de ceros de un píxel hace que el límite del canvas también cuente
-    como exterior, incluso cuando la máscara válida llega hasta ese límite.
-    DIST_L2 con máscara 5 aproxima la distancia euclídea.
+    Parámetros
+    ----------
+    mask : np.ndarray
+        Máscara con valores nulos fuera de la imagen.
+
+    Retorna
+    -------
+    np.ndarray
+        Pesos ``float32`` positivos dentro y nulos fuera.
     """
     binary = (mask > 0).astype(np.uint8)
     padded = cv2.copyMakeBorder(binary, 1, 1, 1, 1, cv2.BORDER_CONSTANT, value=0)
@@ -49,11 +75,19 @@ def distance_weight(mask):
 
 
 def distance_weighted_blend(images, weights):
-    """Retorna (panorama uint8, suma de pesos float32).
+    """Combina imágenes con pesos y normaliza cada píxel.
 
-    Los pesos provienen de distance_weight: positivos dentro de cada máscara
-    y cero fuera. Se expanden sobre los tres canales y se normalizan por píxel.
-    Donde no hay peso, el panorama queda negro.
+    Parámetros
+    ----------
+    images : list[np.ndarray]
+        Imágenes del mismo canvas.
+    weights : list[np.ndarray]
+        Pesos no negativos de cada imagen.
+
+    Retorna
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Panorama ``uint8`` y suma de pesos ``float32``.
     """
     accumulator = np.zeros(images[0].shape, dtype=np.float32)
     denominator = np.zeros(images[0].shape[:2], dtype=np.float32)
