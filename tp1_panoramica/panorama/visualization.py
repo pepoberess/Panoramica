@@ -154,7 +154,9 @@ def imprimir_evaluacion_matching(rows):
         )
 
 
-def mostrar_correspondencias_manuales(analysis, correspondences):
+
+
+def mostrar_correspondencias_manuales(analysis, correspondences, udesa=False):
     """Grafica los cuatro puntos manuales en laterales y ancla."""
     source_indices = sorted(correspondences)
     _, axes = plt.subplots(len(source_indices), 2, figsize=(12, 10))
@@ -166,7 +168,8 @@ def mostrar_correspondencias_manuales(analysis, correspondences):
                 axes[row, 0],
                 analysis.images[source_index],
                 source_points,
-                f"Puntos manuales: Cuadro {source_index}",
+                f"Puntos manuales: Udesa {source_index}" if udesa
+                else f"Puntos manuales: Cuadro {source_index}",
             ),
             (
                 axes[row, 1],
@@ -193,11 +196,14 @@ def mostrar_correspondencias_manuales(analysis, correspondences):
     plt.show()
 
 
-def imprimir_homografias_manuales(results):
+def imprimir_homografias_manuales(results, udesa=False):
     """Imprime las matrices DLT y el error sobre los cuatro puntos."""
     for source_index in sorted(results):
         errors = results[source_index]["errors"]
-        print(f"Cuadro {source_index} → 1")
+        if udesa:
+            print(f"Udesa {source_index} → 1")
+        else:
+            print(f"Cuadro {source_index} → 1")
         print(results[source_index]["H"])
         print(
             f"Error en los cuatro puntos: media {errors.mean():.6f} px; "

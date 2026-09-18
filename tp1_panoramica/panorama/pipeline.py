@@ -314,6 +314,33 @@ def correspondencias_manuales_cuadro():
         ),
     }
 
+def correspondencias_manuales_udesa():
+    """Devuelve cuatro pares manuales para cada lateral del dataset Cuadro.
+
+    Retorna
+    -------
+    dict[int, tuple[np.ndarray, np.ndarray]]
+        Coordenadas lateral y ancla para los pares 0 hacia 1 y 2 hacia 1.
+    """
+    return {
+        0: (
+            np.float64(
+                [[2295, 1161], [1595, 1557], [2383, 1628], [2599, 1497]]
+            ),
+            np.float64(
+                [[1411, 1222], [717, 1620], [1509, 1682], [1721, 1552]]
+            ),
+        ),
+        2: (
+            np.float64(
+                [[601, 1724], [711, 1900], [1394, 1726], [1069, 1495]]
+            ),
+            np.float64(
+                [[2015, 1739], [2133, 1911], [2811, 1721], [2465, 1500]]
+            ),
+        ),
+    }
+
 
 def estimar_homografias_manuales(correspondences):
     """Calcula DLT y error para los pares elegidos manualmente.
